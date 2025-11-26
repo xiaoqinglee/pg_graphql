@@ -86,8 +86,9 @@ pub fn determine_binding_strategy(param: &Param) -> BindingStrategy {
         // Double precision (float8): f64 matches exactly
         (Some(701), ParamValue::Float(_)) => BindingStrategy::Native,
 
-        // Real (float4): f64 can be safely narrowed (PostgreSQL will handle range)
-        (Some(700), ParamValue::Float(_)) => BindingStrategy::Native,
+        // Real (float4): Use text fallback - f64 to f32 conversion needs care
+        // The datum size mismatch between f64 and float4 causes corruption
+        // (Some(700), ParamValue::Float(_)) => BindingStrategy::Native,
 
         // Text: String matches exactly
         (Some(25), ParamValue::String(_)) => BindingStrategy::Native,
@@ -162,13 +163,10 @@ fn convert_native(param: &Param) -> DatumWithOid<'static> {
         }
 
         ParamValue::Float(f) => {
+            // Only float8 (double precision) uses native binding
+            // float4 falls back to text due to f64->f32 size mismatch
             let datum = f.into_datum().expect("f64 should convert");
-            let pg_oid = if oid == 700 {
-                PgBuiltInOids::FLOAT4OID
-            } else {
-                PgBuiltInOids::FLOAT8OID
-            };
-            unsafe { DatumWithOid::new(datum, PgOid::BuiltIn(pg_oid).value()) }
+            unsafe { DatumWithOid::new(datum, PgOid::BuiltIn(PgBuiltInOids::FLOAT8OID).value()) }
         }
 
         ParamValue::String(s) => {
@@ -379,11 +377,21 @@ mod tests {
     }
 
     #[test]
-    fn test_binding_strategy_float() {
+    fn test_binding_strategy_float8() {
         let param = Param::new(1, ParamValue::Float(3.14), SqlType::double_precision());
         assert_eq!(
             determine_binding_strategy(&param),
             BindingStrategy::Native
+        );
+    }
+
+    #[test]
+    fn test_binding_strategy_float4_uses_text() {
+        // float4 (real) uses text fallback due to f64->f32 size mismatch
+        let param = Param::new(1, ParamValue::Float(3.14), SqlType::real());
+        assert_eq!(
+            determine_binding_strategy(&param),
+            BindingStrategy::TextWithCast
         );
     }
 }

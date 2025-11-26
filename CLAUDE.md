@@ -18,20 +18,26 @@ cargo pgrx run pg16  # or pg14, pg15, pg17, pg18
 
 ## Testing
 
+**IMPORTANT**: pg_regress is the primary test suite for checking regressions. Always run pg_regress tests to verify changes, not just unit tests.
+
 Tests use PostgreSQL's pg_regress framework with SQL files:
 - Test SQL files: `test/sql/*.sql`
 - Expected output: `test/expected/*.out`
 - Actual output (after running): `results/*.out`
 
 ```bash
-# Run all tests
-./bin/installcheck
+# Preferred: Run all pg_regress tests (installs extension and runs tests)
+./run_tests.sh
 
-# Run a single test (without .sql extension)
-./bin/installcheck aliases
+# Run specific test(s)
+./run_tests.sh test_name another_test
 
-# Build and test in one command
-cargo pgrx install && ./bin/installcheck
+# Alternative: Manual steps
+cargo pgrx install --pg-config /opt/homebrew/opt/postgresql@17/bin/pg_config --features pg17 --no-default-features
+./bin/installcheck_local
+
+# Run unit tests only (not sufficient for regression testing)
+cargo pgrx test pg17
 ```
 
 When writing or editing tests:
@@ -39,6 +45,8 @@ When writing or editing tests:
 2. Run the test to generate output in `results/test_name.out`
 3. Manually verify the output
 4. Copy to `test/expected/test_name.out` to make it pass
+
+**Never modify expected output files** (`test/expected/*.out`) unless you have verified that the new output is correct. If a test fails, investigate and fix the code, don't change the expected output.
 
 ## Architecture
 
