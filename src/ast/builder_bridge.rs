@@ -145,117 +145,279 @@ pub fn add_param_from_json(
     Ok(params.add(param_value, sql_type))
 }
 
+// =============================================================================
+// Expression Builder - Consolidated helper functions for creating Expr nodes
+// =============================================================================
+
+/// Builder for creating SQL expressions with a fluent API.
+///
+/// This struct consolidates all expression-building helper functions into
+/// a single namespace for better discoverability and organization.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use pg_graphql::ast::ExprBuilder;
+///
+/// let col = ExprBuilder::column("users", "id");
+/// let lit = ExprBuilder::string("hello");
+/// let agg = ExprBuilder::count_star();
+/// ```
+pub struct ExprBuilder;
+
+impl ExprBuilder {
+    // -------------------------------------------------------------------------
+    // Column references
+    // -------------------------------------------------------------------------
+
+    /// Create a qualified column reference (table.column)
+    #[inline]
+    pub fn column(table_alias: &str, column_name: &str) -> Expr {
+        Expr::Column(ColumnRef::qualified(table_alias, column_name))
+    }
+
+    /// Create an unqualified column reference
+    #[inline]
+    pub fn column_unqualified(column_name: &str) -> Expr {
+        Expr::Column(ColumnRef::new(column_name))
+    }
+
+    // -------------------------------------------------------------------------
+    // Literals
+    // -------------------------------------------------------------------------
+
+    /// Create a string literal
+    #[inline]
+    pub fn string(s: &str) -> Expr {
+        Expr::Literal(Literal::String(s.to_string()))
+    }
+
+    /// Create an integer literal
+    #[inline]
+    pub fn int(i: i64) -> Expr {
+        Expr::Literal(Literal::Integer(i))
+    }
+
+    /// Create a boolean literal
+    #[inline]
+    pub fn bool(b: bool) -> Expr {
+        Expr::Literal(Literal::Bool(b))
+    }
+
+    /// Create a NULL literal
+    #[inline]
+    pub fn null() -> Expr {
+        Expr::Literal(Literal::Null)
+    }
+
+    /// Create a DEFAULT expression (for INSERT)
+    #[inline]
+    pub fn default() -> Expr {
+        Expr::Literal(Literal::Default)
+    }
+
+    // -------------------------------------------------------------------------
+    // Function calls
+    // -------------------------------------------------------------------------
+
+    /// Create a simple function call
+    #[inline]
+    pub fn func(name: &str, args: Vec<Expr>) -> Expr {
+        Expr::FunctionCall(FunctionCall::new(
+            name,
+            args.into_iter().map(FunctionArg::unnamed).collect(),
+        ))
+    }
+
+    /// Create a schema-qualified function call
+    #[inline]
+    pub fn func_with_schema(schema: &str, name: &str, args: Vec<Expr>) -> Expr {
+        Expr::FunctionCall(FunctionCall::with_schema(
+            schema,
+            name,
+            args.into_iter().map(FunctionArg::unnamed).collect(),
+        ))
+    }
+
+    /// Create a COALESCE expression
+    #[inline]
+    pub fn coalesce(args: Vec<Expr>) -> Expr {
+        Expr::Coalesce(args)
+    }
+
+    // -------------------------------------------------------------------------
+    // Aggregates
+    // -------------------------------------------------------------------------
+
+    /// Create a COUNT(*) expression
+    #[inline]
+    pub fn count_star() -> Expr {
+        Expr::Aggregate(AggregateExpr::count_star())
+    }
+
+    /// Create a jsonb_agg expression
+    #[inline]
+    pub fn jsonb_agg(expr: Expr) -> Expr {
+        Expr::Aggregate(AggregateExpr::new(AggregateFunction::JsonbAgg, vec![expr]))
+    }
+
+    /// Create a jsonb_agg expression with FILTER clause
+    pub fn jsonb_agg_filtered(expr: Expr, filter: Expr) -> Expr {
+        let mut agg = AggregateExpr::new(AggregateFunction::JsonbAgg, vec![expr]);
+        agg.filter = Some(Box::new(filter));
+        Expr::Aggregate(agg)
+    }
+
+    /// Create a jsonb_agg expression with ORDER BY and optional FILTER
+    pub fn jsonb_agg_ordered(expr: Expr, order_by: Vec<OrderByExpr>, filter: Option<Expr>) -> Expr {
+        let mut agg = AggregateExpr::new(AggregateFunction::JsonbAgg, vec![expr]);
+        if !order_by.is_empty() {
+            agg.order_by = Some(order_by);
+        }
+        if let Some(f) = filter {
+            agg.filter = Some(Box::new(f));
+        }
+        Expr::Aggregate(agg)
+    }
+
+    // -------------------------------------------------------------------------
+    // JSON/JSONB helpers
+    // -------------------------------------------------------------------------
+
+    /// Create a jsonb_build_object expression
+    pub fn jsonb_object(pairs: Vec<(String, Expr)>) -> Expr {
+        Expr::JsonBuild(JsonBuildExpr::Object(
+            pairs
+                .into_iter()
+                .map(|(k, v)| (Expr::Literal(Literal::String(k)), v))
+                .collect(),
+        ))
+    }
+
+    /// Create an empty jsonb array: jsonb_build_array()
+    #[inline]
+    pub fn empty_jsonb_array() -> Expr {
+        Self::func("jsonb_build_array", vec![])
+    }
+
+    /// Create an empty jsonb object: '{}'::jsonb
+    #[inline]
+    pub fn empty_jsonb_object() -> Expr {
+        Expr::Cast {
+            expr: Box::new(Expr::Literal(Literal::String("{}".to_string()))),
+            target_type: type_name_to_sql_type("jsonb"),
+        }
+    }
+}
+
+// =============================================================================
+// Standalone helper functions (for backwards compatibility)
+// =============================================================================
+
 /// Helper to create a column reference expression
+#[inline]
 pub fn column_ref(table_alias: &str, column_name: &str) -> Expr {
-    Expr::Column(ColumnRef::qualified(table_alias, column_name))
+    ExprBuilder::column(table_alias, column_name)
 }
 
 /// Helper to create an unqualified column reference
+#[inline]
 pub fn column_ref_unqualified(column_name: &str) -> Expr {
-    Expr::Column(ColumnRef::new(column_name))
+    ExprBuilder::column_unqualified(column_name)
 }
 
 /// Helper to create a simple function call expression
+#[inline]
 pub fn func_call(name: &str, args: Vec<Expr>) -> Expr {
-    Expr::FunctionCall(FunctionCall::new(
-        name,
-        args.into_iter().map(FunctionArg::unnamed).collect(),
-    ))
+    ExprBuilder::func(name, args)
 }
 
 /// Helper to create a schema-qualified function call
+#[inline]
 pub fn func_call_schema(schema: &str, name: &str, args: Vec<Expr>) -> Expr {
-    Expr::FunctionCall(FunctionCall::with_schema(
-        schema,
-        name,
-        args.into_iter().map(FunctionArg::unnamed).collect(),
-    ))
+    ExprBuilder::func_with_schema(schema, name, args)
 }
 
 /// Helper to build jsonb_build_object calls
+#[inline]
 pub fn jsonb_build_object(pairs: Vec<(String, Expr)>) -> Expr {
-    Expr::JsonBuild(JsonBuildExpr::Object(
-        pairs
-            .into_iter()
-            .map(|(k, v)| (Expr::Literal(Literal::String(k)), v))
-            .collect(),
-    ))
+    ExprBuilder::jsonb_object(pairs)
 }
 
 /// Helper to build jsonb_agg calls
+#[inline]
 pub fn jsonb_agg(expr: Expr) -> Expr {
-    Expr::Aggregate(AggregateExpr::new(AggregateFunction::JsonbAgg, vec![expr]))
+    ExprBuilder::jsonb_agg(expr)
 }
 
 /// Helper to build jsonb_agg calls with a FILTER clause
+#[inline]
 pub fn jsonb_agg_with_filter(expr: Expr, filter: Expr) -> Expr {
-    let mut agg = AggregateExpr::new(AggregateFunction::JsonbAgg, vec![expr]);
-    agg.filter = Some(Box::new(filter));
-    Expr::Aggregate(agg)
+    ExprBuilder::jsonb_agg_filtered(expr, filter)
 }
 
 /// Helper to build jsonb_agg calls with ORDER BY and FILTER clauses
+#[inline]
 pub fn jsonb_agg_with_order_and_filter(
     expr: Expr,
     order_by: Vec<OrderByExpr>,
     filter: Option<Expr>,
 ) -> Expr {
-    let mut agg = AggregateExpr::new(AggregateFunction::JsonbAgg, vec![expr]);
-    if !order_by.is_empty() {
-        agg.order_by = Some(order_by);
-    }
-    if let Some(f) = filter {
-        agg.filter = Some(Box::new(f));
-    }
-    Expr::Aggregate(agg)
+    ExprBuilder::jsonb_agg_ordered(expr, order_by, filter)
 }
 
 /// Helper to build coalesce calls
+#[inline]
 pub fn coalesce(args: Vec<Expr>) -> Expr {
-    Expr::Coalesce(args)
+    ExprBuilder::coalesce(args)
 }
 
 /// Helper to build count(*) expression
+#[inline]
 pub fn count_star() -> Expr {
-    Expr::Aggregate(AggregateExpr::count_star())
+    ExprBuilder::count_star()
 }
 
 /// Helper to create a string literal expression
+#[inline]
 pub fn string_literal(s: &str) -> Expr {
-    Expr::Literal(Literal::String(s.to_string()))
+    ExprBuilder::string(s)
 }
 
 /// Helper to create an empty jsonb array expression
+#[inline]
 pub fn empty_jsonb_array() -> Expr {
-    func_call("jsonb_build_array", vec![])
+    ExprBuilder::empty_jsonb_array()
 }
 
 /// Helper to create an empty jsonb object expression
+#[inline]
 pub fn empty_jsonb_object() -> Expr {
-    Expr::Cast {
-        expr: Box::new(Expr::Literal(Literal::String("{}".to_string()))),
-        target_type: type_name_to_sql_type("jsonb"),
-    }
+    ExprBuilder::empty_jsonb_object()
 }
 
 /// Helper to create an integer literal
+#[inline]
 pub fn int_literal(i: i64) -> Expr {
-    Expr::Literal(Literal::Integer(i))
+    ExprBuilder::int(i)
 }
 
 /// Helper to create a boolean literal
+#[inline]
 pub fn bool_literal(b: bool) -> Expr {
-    Expr::Literal(Literal::Bool(b))
+    ExprBuilder::bool(b)
 }
 
 /// Helper to create a NULL literal
+#[inline]
 pub fn null_literal() -> Expr {
-    Expr::Literal(Literal::Null)
+    ExprBuilder::null()
 }
 
 /// Helper to create DEFAULT expression (for INSERT)
+#[inline]
 pub fn default_expr() -> Expr {
-    Expr::Literal(Literal::Default)
+    ExprBuilder::default()
 }
 
 #[cfg(test)]

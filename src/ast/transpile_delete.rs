@@ -333,6 +333,6 @@ mod tests {
     fn test_delete_ast_structure() {
         // Basic structure test - full testing via pg_regress
         let ident = Ident::new("test_table");
-        assert_eq!(ident.0, "test_table");
+        assert_eq!(ident.as_str(), "test_table");
     }
 }

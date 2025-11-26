@@ -3,6 +3,13 @@
 //! This module converts AST nodes to SQL strings. It is the only place
 //! in the codebase where SQL strings are constructed.
 //!
+//! # Architecture
+//!
+//! The rendering system is built around two key components:
+//!
+//! - [`Render`] trait: Implemented by all AST nodes to define how they render to SQL
+//! - [`SqlRenderer`]: The rendering context that handles output buffering and formatting
+//!
 //! # Safety
 //!
 //! All identifiers are properly quoted using PostgreSQL's quoting rules.
@@ -13,6 +20,105 @@ use super::expr::*;
 use super::stmt::*;
 use super::types::SqlType;
 use std::fmt::Write;
+
+// =============================================================================
+// Render Trait
+// =============================================================================
+
+/// Trait for AST nodes that can be rendered to SQL.
+///
+/// This trait allows each AST node type to define its own rendering logic
+/// while sharing the common [`SqlRenderer`] infrastructure.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use pg_graphql::ast::{Render, SqlRenderer, Expr};
+///
+/// let expr = Expr::int(42);
+/// let mut renderer = SqlRenderer::new();
+/// expr.render(&mut renderer);
+/// let sql = renderer.into_sql();
+/// assert_eq!(sql, "42");
+/// ```
+pub trait Render {
+    /// Render this node to the given SQL renderer
+    fn render(&self, renderer: &mut SqlRenderer);
+}
+
+// Implement Render for Stmt
+impl Render for Stmt {
+    fn render(&self, renderer: &mut SqlRenderer) {
+        match self {
+            Stmt::Select(s) => s.render(renderer),
+            Stmt::Insert(s) => s.render(renderer),
+            Stmt::Update(s) => s.render(renderer),
+            Stmt::Delete(s) => s.render(renderer),
+        }
+    }
+}
+
+// Implement Render for SelectStmt
+impl Render for SelectStmt {
+    fn render(&self, renderer: &mut SqlRenderer) {
+        renderer.render_select(self);
+    }
+}
+
+// Implement Render for InsertStmt
+impl Render for InsertStmt {
+    fn render(&self, renderer: &mut SqlRenderer) {
+        renderer.render_insert(self);
+    }
+}
+
+// Implement Render for UpdateStmt
+impl Render for UpdateStmt {
+    fn render(&self, renderer: &mut SqlRenderer) {
+        renderer.render_update(self);
+    }
+}
+
+// Implement Render for DeleteStmt
+impl Render for DeleteStmt {
+    fn render(&self, renderer: &mut SqlRenderer) {
+        renderer.render_delete(self);
+    }
+}
+
+// Implement Render for Expr
+impl Render for Expr {
+    fn render(&self, renderer: &mut SqlRenderer) {
+        renderer.render_expr(self);
+    }
+}
+
+// Implement Render for Literal
+impl Render for Literal {
+    fn render(&self, renderer: &mut SqlRenderer) {
+        renderer.render_literal(self);
+    }
+}
+
+// Implement Render for Ident
+impl Render for Ident {
+    fn render(&self, renderer: &mut SqlRenderer) {
+        renderer.write_ident(self);
+    }
+}
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Default buffer capacity for simple queries
+const DEFAULT_BUFFER_CAPACITY: usize = 1024;
+
+/// Buffer capacity for queries with CTEs (e.g., connection queries)
+const CTE_BUFFER_CAPACITY: usize = 4096;
+
+/// Buffer capacity for complex queries with many CTEs
+const LARGE_BUFFER_CAPACITY: usize = 8192;
 
 /// SQL renderer with optional pretty-printing
 pub struct SqlRenderer {
@@ -25,7 +131,16 @@ impl SqlRenderer {
     /// Create a new renderer with compact output
     pub fn new() -> Self {
         Self {
-            output: String::with_capacity(1024),
+            output: String::with_capacity(DEFAULT_BUFFER_CAPACITY),
+            indent_level: 0,
+            pretty: false,
+        }
+    }
+
+    /// Create a new renderer with a specific buffer capacity
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            output: String::with_capacity(capacity),
             indent_level: 0,
             pretty: false,
         }
@@ -34,9 +149,49 @@ impl SqlRenderer {
     /// Create a new renderer with pretty-printed output
     pub fn pretty() -> Self {
         Self {
-            output: String::with_capacity(1024),
+            output: String::with_capacity(DEFAULT_BUFFER_CAPACITY),
             indent_level: 0,
             pretty: true,
+        }
+    }
+
+    /// Estimate appropriate buffer capacity based on statement complexity
+    pub fn estimate_capacity(stmt: &Stmt) -> usize {
+        match stmt {
+            Stmt::Select(s) => {
+                let cte_count = s.ctes.len();
+                if cte_count >= 5 {
+                    LARGE_BUFFER_CAPACITY
+                } else if cte_count > 0 {
+                    CTE_BUFFER_CAPACITY
+                } else {
+                    DEFAULT_BUFFER_CAPACITY
+                }
+            }
+            Stmt::Insert(s) => {
+                let cte_count = s.ctes.len();
+                if cte_count > 0 {
+                    CTE_BUFFER_CAPACITY
+                } else {
+                    DEFAULT_BUFFER_CAPACITY
+                }
+            }
+            Stmt::Update(s) => {
+                let cte_count = s.ctes.len();
+                if cte_count > 0 {
+                    CTE_BUFFER_CAPACITY
+                } else {
+                    DEFAULT_BUFFER_CAPACITY
+                }
+            }
+            Stmt::Delete(s) => {
+                let cte_count = s.ctes.len();
+                if cte_count > 0 {
+                    CTE_BUFFER_CAPACITY
+                } else {
+                    DEFAULT_BUFFER_CAPACITY
+                }
+            }
         }
     }
 
@@ -482,6 +637,8 @@ impl SqlRenderer {
                 self.write(")");
             }
 
+            // Raw SQL - only available in tests
+            #[cfg(test)]
             Expr::Raw(sql) => {
                 self.write(sql);
             }
@@ -775,7 +932,7 @@ impl SqlRenderer {
         // Always quote identifiers to prevent SQL injection and handle special chars
         self.output.push('"');
         // Escape any double quotes in the identifier by doubling them
-        for c in ident.0.chars() {
+        for c in ident.as_str().chars() {
             if c == '"' {
                 self.output.push('"');
             }
@@ -832,15 +989,23 @@ impl Default for SqlRenderer {
 // =========================================================================
 
 /// Render a statement to a compact SQL string
+///
+/// Uses estimated buffer capacity based on statement complexity to reduce allocations.
 pub fn render(stmt: &Stmt) -> String {
-    let mut renderer = SqlRenderer::new();
+    let capacity = SqlRenderer::estimate_capacity(stmt);
+    let mut renderer = SqlRenderer::with_capacity(capacity);
     renderer.render_stmt(stmt);
     renderer.into_sql()
 }
 
 /// Render a statement to a pretty-printed SQL string
 pub fn render_pretty(stmt: &Stmt) -> String {
-    let mut renderer = SqlRenderer::pretty();
+    let capacity = SqlRenderer::estimate_capacity(stmt);
+    let mut renderer = SqlRenderer {
+        output: String::with_capacity(capacity),
+        indent_level: 0,
+        pretty: true,
+    };
     renderer.render_stmt(stmt);
     renderer.into_sql()
 }

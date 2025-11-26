@@ -14,8 +14,16 @@ use super::types::SqlType;
 pub struct Ident(pub String);
 
 impl Ident {
+    /// Create a new identifier from any string-like type
+    #[inline]
     pub fn new(s: impl Into<String>) -> Self {
         Self(s.into())
+    }
+
+    /// Get the identifier as a string slice
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
@@ -540,7 +548,17 @@ pub enum Expr {
     /// Parenthesized expression (for explicit grouping)
     Nested(Box<Expr>),
 
-    /// Raw SQL (escape hatch - use sparingly!)
+    /// Raw SQL string - **DEPRECATED**: Use only in tests.
+    ///
+    /// This is a security-sensitive escape hatch that bypasses SQL injection protection.
+    /// All production code should use type-safe AST nodes instead. If you need SQL
+    /// functionality not yet supported by the AST, add a proper node type.
+    ///
+    /// # Security Warning
+    ///
+    /// Never use this with user-provided input. The string is rendered directly
+    /// to SQL without any escaping or validation.
+    #[cfg(test)]
     Raw(String),
 
     /// Array index access: array[index]
@@ -674,7 +692,12 @@ impl Expr {
         Self::binary(self, BinaryOperator::Eq, other)
     }
 
-    /// Create raw SQL (escape hatch)
+    /// Create raw SQL - **DEPRECATED**: Use only in tests.
+    ///
+    /// # Security Warning
+    ///
+    /// This bypasses SQL injection protection. Never use with user input.
+    #[cfg(test)]
     pub fn raw(sql: impl Into<String>) -> Self {
         Self::Raw(sql.into())
     }
@@ -687,12 +710,12 @@ mod tests {
     #[test]
     fn test_column_ref() {
         let col = ColumnRef::new("id");
-        assert_eq!(col.column.0, "id");
+        assert_eq!(col.column.as_str(), "id");
         assert!(col.table_alias.is_none());
 
         let col = ColumnRef::qualified("users", "id");
-        assert_eq!(col.table_alias.unwrap().0, "users");
-        assert_eq!(col.column.0, "id");
+        assert_eq!(col.table_alias.unwrap().as_str(), "users");
+        assert_eq!(col.column.as_str(), "id");
     }
 
     #[test]
@@ -700,8 +723,8 @@ mod tests {
         let expr = Expr::qualified_column("t", "id");
         match expr {
             Expr::Column(c) => {
-                assert_eq!(c.table_alias.unwrap().0, "t");
-                assert_eq!(c.column.0, "id");
+                assert_eq!(c.table_alias.unwrap().as_str(), "t");
+                assert_eq!(c.column.as_str(), "id");
             }
             _ => panic!("Expected Column"),
         }
