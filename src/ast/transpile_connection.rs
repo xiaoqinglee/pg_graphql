@@ -312,48 +312,30 @@ fn build_cursor_pagination_clause_recursive(
     let nulls_first = order_elem.direction.nulls_first();
 
     // Build: (col > val OR (col IS NOT NULL AND val IS NULL AND nulls_first))
+    // The nulls_first is a boolean literal - when false, the AND false makes the whole
+    // null-handling branch false, so only the main comparison matters.
     let main_compare = Expr::BinaryOp {
         left: Box::new(col_expr.clone()),
         op,
         right: Box::new(val_expr.clone()),
     };
 
-    let null_handling = if nulls_first {
-        // When nulls first: non-null values come after null values
-        // So (col IS NOT NULL AND val IS NULL) means we're past the cursor
-        Expr::BinaryOp {
-            left: Box::new(Expr::BinaryOp {
-                left: Box::new(Expr::IsNull {
-                    expr: Box::new(col_expr.clone()),
-                    negated: true, // IS NOT NULL
-                }),
-                op: BinaryOperator::And,
-                right: Box::new(Expr::IsNull {
-                    expr: Box::new(val_expr.clone()),
-                    negated: false, // IS NULL
-                }),
+    // Build: (col IS NOT NULL AND val IS NULL AND {nulls_first literal})
+    // This matches the original transpiler exactly
+    let null_handling = Expr::BinaryOp {
+        left: Box::new(Expr::BinaryOp {
+            left: Box::new(Expr::IsNull {
+                expr: Box::new(col_expr.clone()),
+                negated: true, // IS NOT NULL
             }),
             op: BinaryOperator::And,
-            right: Box::new(Expr::Literal(Literal::Bool(true))),
-        }
-    } else {
-        // When nulls last: null values come after non-null values
-        // So (col IS NULL AND val IS NOT NULL) means we're past the cursor
-        Expr::BinaryOp {
-            left: Box::new(Expr::BinaryOp {
-                left: Box::new(Expr::IsNull {
-                    expr: Box::new(col_expr.clone()),
-                    negated: false, // IS NULL
-                }),
-                op: BinaryOperator::And,
-                right: Box::new(Expr::IsNull {
-                    expr: Box::new(val_expr.clone()),
-                    negated: true, // IS NOT NULL
-                }),
+            right: Box::new(Expr::IsNull {
+                expr: Box::new(val_expr.clone()),
+                negated: false, // IS NULL
             }),
-            op: BinaryOperator::And,
-            right: Box::new(Expr::Literal(Literal::Bool(true))),
-        }
+        }),
+        op: BinaryOperator::And,
+        right: Box::new(Expr::Literal(Literal::Bool(nulls_first))),
     };
 
     // First condition: (col > val) OR (col IS NOT NULL AND val IS NULL AND nulls_first)
