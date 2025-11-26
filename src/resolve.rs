@@ -8,8 +8,6 @@ use crate::graphql::*;
 use crate::omit::*;
 use crate::parser_util::*;
 use crate::sql_types::get_one_readonly;
-#[cfg(not(feature = "ast_transpile"))]
-use crate::transpile::{MutationEntrypoint, QueryEntrypoint};
 use graphql_parser::query::Selection;
 use graphql_parser::query::{
     Definition, Document, FragmentDefinition, Mutation, OperationDefinition, Query, SelectionSet,
@@ -18,7 +16,6 @@ use graphql_parser::query::{
 use itertools::Itertools;
 use serde_json::{json, Value};
 
-#[cfg(feature = "ast_transpile")]
 use crate::ast::AstExecutable;
 
 #[allow(non_snake_case)]
@@ -225,10 +222,7 @@ where
 
                             match connection_builder {
                                 Ok(builder) => {
-                                    #[cfg(feature = "ast_transpile")]
                                     let result = builder.execute_via_ast();
-                                    #[cfg(not(feature = "ast_transpile"))]
-                                    let result = builder.execute();
 
                                     match result {
                                         Ok(d) => {
@@ -256,10 +250,7 @@ where
 
                             match node_builder {
                                 Ok(builder) => {
-                                    #[cfg(feature = "ast_transpile")]
                                     let result = builder.execute_via_ast();
-                                    #[cfg(not(feature = "ast_transpile"))]
-                                    let result = builder.execute();
 
                                     match result {
                                         Ok(d) => {
@@ -336,13 +327,7 @@ where
 
                                 match function_call_builder {
                                     Ok(builder) => {
-                                        #[cfg(feature = "ast_transpile")]
                                         let result = builder.execute_via_ast();
-                                        #[cfg(not(feature = "ast_transpile"))]
-                                        let result =
-                                            <FunctionCallBuilder as QueryEntrypoint>::execute(
-                                                &builder,
-                                            );
 
                                         match result {
                                             Ok(d) => {
@@ -475,10 +460,7 @@ where
                                     }
                                 };
 
-                                #[cfg(feature = "ast_transpile")]
                                 let (d, conn) = builder.execute_mutation_via_ast(conn)?;
-                                #[cfg(not(feature = "ast_transpile"))]
-                                let (d, conn) = builder.execute(conn)?;
 
                                 res_data[alias_or_name(selection)] = d;
                                 conn
@@ -497,10 +479,7 @@ where
                                     }
                                 };
 
-                                #[cfg(feature = "ast_transpile")]
                                 let (d, conn) = builder.execute_mutation_via_ast(conn)?;
-                                #[cfg(not(feature = "ast_transpile"))]
-                                let (d, conn) = builder.execute(conn)?;
                                 res_data[alias_or_name(selection)] = d;
                                 conn
                             }
@@ -518,10 +497,7 @@ where
                                     }
                                 };
 
-                                #[cfg(feature = "ast_transpile")]
                                 let (d, conn) = builder.execute_mutation_via_ast(conn)?;
-                                #[cfg(not(feature = "ast_transpile"))]
-                                let (d, conn) = builder.execute(conn)?;
                                 res_data[alias_or_name(selection)] = d;
                                 conn
                             }
@@ -545,14 +521,8 @@ where
                                         }
                                     };
 
-                                    #[cfg(feature = "ast_transpile")]
                                     let (d, conn) =
                                         builder.execute_mutation_via_ast(conn)?;
-                                    #[cfg(not(feature = "ast_transpile"))]
-                                    let (d, conn) =
-                                        <FunctionCallBuilder as MutationEntrypoint>::execute(
-                                            &builder, conn,
-                                        )?;
                                     res_data[alias_or_name(selection)] = d;
                                     conn
                                 }

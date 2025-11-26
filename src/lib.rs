@@ -17,8 +17,6 @@ mod omit;
 mod parser_util;
 mod resolve;
 mod sql_types;
-#[cfg(not(feature = "ast_transpile"))]
-mod transpile;
 
 pg_module_magic!();
 
