@@ -35,6 +35,6 @@ RUN cargo pgrx init --pg${PG_MAJOR} $(which pg_config)
 USER root
 
 COPY . .
-RUN cargo pgrx install --release --features pg${PG_MAJOR}
+RUN cargo pgrx install --release --features "pg${PG_MAJOR} ast_transpile"
 
 USER postgres

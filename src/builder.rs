@@ -5,7 +5,7 @@ use crate::gson;
 use crate::parser_util::*;
 use crate::sql_types::*;
 use graphql_parser::query::*;
-use serde::Serialize;
+use serde::ser::{Serialize, SerializeMap, Serializer};
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::ops::Deref;
@@ -2159,7 +2159,7 @@ where
 // Introspection
 
 #[allow(clippy::large_enum_variant)]
-#[derive(Serialize, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub enum __FieldField {
     Name,
     Description,
@@ -2170,7 +2170,7 @@ pub enum __FieldField {
     Typename { alias: String, typename: String },
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct __FieldSelection {
     pub alias: String,
     pub selection: __FieldField,
@@ -2182,7 +2182,7 @@ pub struct __FieldBuilder {
     pub selections: Vec<__FieldSelection>,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub enum __EnumValueField {
     Name,
     Description,
@@ -2191,7 +2191,7 @@ pub enum __EnumValueField {
     Typename { alias: String, typename: String },
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct __EnumValueSelection {
     pub alias: String,
     pub selection: __EnumValueField,
@@ -2204,7 +2204,7 @@ pub struct __EnumValueBuilder {
 }
 
 #[allow(clippy::large_enum_variant)]
-#[derive(Serialize, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub enum __InputValueField {
     Name,
     Description,
@@ -2215,7 +2215,7 @@ pub enum __InputValueField {
     Typename { alias: String, typename: String },
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct __InputValueSelection {
     pub alias: String,
     pub selection: __InputValueField,
@@ -2281,9 +2281,8 @@ pub struct __DirectiveBuilder {
     pub selections: Vec<__DirectiveSelection>,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Clone, Debug)]
 #[allow(dead_code)]
-#[serde(untagged)]
 pub enum __SchemaField {
     Description,
     Types(Vec<__TypeBuilder>),
@@ -2294,7 +2293,7 @@ pub enum __SchemaField {
     Typename { alias: String, typename: String },
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct __SchemaSelection {
     pub alias: String,
     pub selection: __SchemaField,
@@ -2972,5 +2971,224 @@ impl __Schema {
                 "can not build query for non-__schema type",
             )),
         }
+    }
+}
+
+// Custom Serialize implementations for introspection builders
+// These serialize based on the selected fields, not all fields
+
+impl Serialize for __FieldBuilder {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.selections.len()))?;
+
+        for selection in &self.selections {
+            match &selection.selection {
+                __FieldField::Name => {
+                    map.serialize_entry(&selection.alias, &self.field.name())?;
+                }
+                __FieldField::Description => {
+                    map.serialize_entry(&selection.alias, &self.field.description())?;
+                }
+
+                __FieldField::IsDeprecated => {
+                    map.serialize_entry(&selection.alias, &self.field.is_deprecated())?;
+                }
+                __FieldField::DeprecationReason => {
+                    map.serialize_entry(&selection.alias, &self.field.deprecation_reason())?;
+                }
+                __FieldField::Arguments(input_value_builders) => {
+                    map.serialize_entry(&selection.alias, input_value_builders)?;
+                }
+                __FieldField::Type(t) => {
+                    map.serialize_entry(&selection.alias, t)?;
+                }
+                __FieldField::Typename { alias, typename } => {
+                    map.serialize_entry(alias, typename)?;
+                }
+            }
+        }
+        map.end()
+    }
+}
+
+impl Serialize for __TypeBuilder {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.selections.len()))?;
+
+        for selection in &self.selections {
+            match &selection.selection {
+                __TypeField::Kind => {
+                    map.serialize_entry(&selection.alias, &format!("{:?}", self.type_.kind()))?;
+                }
+                __TypeField::Name => {
+                    map.serialize_entry(&selection.alias, &self.type_.name())?;
+                }
+                __TypeField::Description => {
+                    map.serialize_entry(&selection.alias, &self.type_.description())?;
+                }
+                __TypeField::Fields(fields) => {
+                    map.serialize_entry(&selection.alias, fields)?;
+                }
+                __TypeField::InputFields(input_field_builders) => {
+                    map.serialize_entry(&selection.alias, input_field_builders)?;
+                }
+                __TypeField::Interfaces(interfaces) => {
+                    map.serialize_entry(&selection.alias, &interfaces)?;
+                }
+                __TypeField::EnumValues(enum_values) => {
+                    map.serialize_entry(&selection.alias, enum_values)?;
+                }
+                __TypeField::PossibleTypes(possible_types) => {
+                    map.serialize_entry(&selection.alias, &possible_types)?;
+                }
+                __TypeField::OfType(t_builder) => {
+                    map.serialize_entry(&selection.alias, t_builder)?;
+                }
+                __TypeField::Typename { alias, typename } => {
+                    map.serialize_entry(alias, typename)?;
+                }
+            }
+        }
+        map.end()
+    }
+}
+
+impl Serialize for __DirectiveBuilder {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.selections.len()))?;
+        for selection in &self.selections {
+            match &selection.selection {
+                __DirectiveField::Name => {
+                    map.serialize_entry(&selection.alias, &self.directive.name())?;
+                }
+                __DirectiveField::Description => {
+                    map.serialize_entry(&selection.alias, &self.directive.description())?;
+                }
+                __DirectiveField::Locations => {
+                    map.serialize_entry(&selection.alias, &self.directive.locations())?;
+                }
+                __DirectiveField::Args(args) => {
+                    map.serialize_entry(&selection.alias, args)?;
+                }
+                __DirectiveField::IsRepeatable => {
+                    map.serialize_entry(&selection.alias, &self.directive.is_repeatable())?;
+                }
+                __DirectiveField::Typename { alias, typename } => {
+                    map.serialize_entry(alias, typename)?;
+                }
+            }
+        }
+        map.end()
+    }
+}
+
+impl Serialize for __SchemaBuilder {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.selections.len()))?;
+
+        for selection in &self.selections {
+            match &selection.selection {
+                __SchemaField::Description => {
+                    map.serialize_entry(&selection.alias, &self.description)?;
+                }
+                __SchemaField::Types(type_builders) => {
+                    map.serialize_entry(&selection.alias, &type_builders)?;
+                }
+                __SchemaField::QueryType(type_builder) => {
+                    map.serialize_entry(&selection.alias, &type_builder)?;
+                }
+                __SchemaField::MutationType(type_builder) => {
+                    map.serialize_entry(&selection.alias, &type_builder)?;
+                }
+                __SchemaField::SubscriptionType(type_builder) => {
+                    map.serialize_entry(&selection.alias, &type_builder)?;
+                }
+                __SchemaField::Directives(directives) => {
+                    map.serialize_entry(&selection.alias, directives)?;
+                }
+                __SchemaField::Typename { alias, typename } => {
+                    map.serialize_entry(alias, typename)?;
+                }
+            }
+        }
+        map.end()
+    }
+}
+
+impl Serialize for __InputValueBuilder {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.selections.len()))?;
+
+        for selection in &self.selections {
+            match &selection.selection {
+                __InputValueField::Name => {
+                    map.serialize_entry(&selection.alias, &self.input_value.name())?;
+                }
+                __InputValueField::Description => {
+                    map.serialize_entry(&selection.alias, &self.input_value.description())?;
+                }
+                __InputValueField::Type(type_builder) => {
+                    map.serialize_entry(&selection.alias, &type_builder)?;
+                }
+                __InputValueField::DefaultValue => {
+                    map.serialize_entry(&selection.alias, &self.input_value.default_value())?;
+                }
+                __InputValueField::IsDeprecated => {
+                    map.serialize_entry(&selection.alias, &self.input_value.is_deprecated())?;
+                }
+                __InputValueField::DeprecationReason => {
+                    map.serialize_entry(&selection.alias, &self.input_value.deprecation_reason())?;
+                }
+                __InputValueField::Typename { alias, typename } => {
+                    map.serialize_entry(alias, typename)?;
+                }
+            }
+        }
+        map.end()
+    }
+}
+
+impl Serialize for __EnumValueBuilder {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.selections.len()))?;
+
+        for selection in &self.selections {
+            match &selection.selection {
+                __EnumValueField::Name => {
+                    map.serialize_entry(&selection.alias, &self.enum_value.name())?;
+                }
+                __EnumValueField::Description => {
+                    map.serialize_entry(&selection.alias, &self.enum_value.description())?;
+                }
+                __EnumValueField::IsDeprecated => {
+                    map.serialize_entry(&selection.alias, &self.enum_value.is_deprecated())?;
+                }
+                __EnumValueField::DeprecationReason => {
+                    map.serialize_entry(&selection.alias, &self.enum_value.deprecation_reason())?;
+                }
+                __EnumValueField::Typename { alias, typename } => {
+                    map.serialize_entry(alias, typename)?;
+                }
+            }
+        }
+        map.end()
     }
 }

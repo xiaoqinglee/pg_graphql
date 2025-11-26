@@ -5,9 +5,11 @@ use pgrx::*;
 use resolve::resolve_inner;
 use serde_json::json;
 
+pub mod ast;
 mod builder;
 mod constants;
 mod error;
+pub mod executor;
 mod graphql;
 mod gson;
 mod merge;
@@ -15,6 +17,7 @@ mod omit;
 mod parser_util;
 mod resolve;
 mod sql_types;
+#[cfg(not(feature = "ast_transpile"))]
 mod transpile;
 
 pg_module_magic!();
