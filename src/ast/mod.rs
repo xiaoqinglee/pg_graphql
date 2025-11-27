@@ -44,7 +44,6 @@ mod builder_bridge;
 mod cte;
 mod execute;
 mod expr;
-mod native_param;
 mod params;
 mod render;
 mod stmt;

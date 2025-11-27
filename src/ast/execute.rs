@@ -6,14 +6,101 @@
 //!
 //! # Parameter Binding
 //!
-//! Parameters are bound using native PostgreSQL types where safe, falling back
-//! to text representation for custom types. See [`super::native_param`] for details.
+//! All parameters are converted to text representation and passed with TEXTOID.
+//! PostgreSQL handles type conversion via SQL-side cast expressions like `($1::integer)`.
+//! This matches the original transpiler behavior exactly.
 
-use super::native_param::params_to_datums;
-use crate::ast::{render, ParamCollector};
+use crate::ast::{render, Param, ParamCollector, ParamValue};
 use crate::error::{GraphQLError, GraphQLResult};
+use pgrx::datum::DatumWithOid;
+use pgrx::pg_sys::PgBuiltInOids;
 use pgrx::spi::{self, Spi, SpiClient};
-use pgrx::JsonB;
+use pgrx::{IntoDatum, JsonB, PgOid};
+
+/// Convert all collected parameters to pgrx datums (as text)
+///
+/// All parameters are converted to text representation and passed with TEXTOID
+/// (or TEXTARRAYOID for arrays). PostgreSQL handles type conversion via the
+/// SQL-side cast expressions like `($1::integer)`.
+fn params_to_datums(params: &ParamCollector) -> Vec<DatumWithOid<'static>> {
+    params.params().iter().map(param_to_datum).collect()
+}
+
+/// Convert a parameter to a pgrx DatumWithOid (as text)
+fn param_to_datum(param: &Param) -> DatumWithOid<'static> {
+    let type_oid = if param.sql_type.is_array {
+        PgOid::BuiltIn(PgBuiltInOids::TEXTARRAYOID)
+    } else {
+        PgOid::BuiltIn(PgBuiltInOids::TEXTOID)
+    };
+
+    match &param.value {
+        ParamValue::Null => DatumWithOid::null_oid(type_oid.value()),
+
+        ParamValue::String(s) => {
+            let datum = s.clone().into_datum();
+            match datum {
+                Some(d) => unsafe { DatumWithOid::new(d, type_oid.value()) },
+                None => DatumWithOid::null_oid(type_oid.value()),
+            }
+        }
+
+        ParamValue::Integer(i) => {
+            let datum = i.to_string().into_datum();
+            match datum {
+                Some(d) => unsafe { DatumWithOid::new(d, type_oid.value()) },
+                None => DatumWithOid::null_oid(type_oid.value()),
+            }
+        }
+
+        ParamValue::Float(f) => {
+            let datum = f.to_string().into_datum();
+            match datum {
+                Some(d) => unsafe { DatumWithOid::new(d, type_oid.value()) },
+                None => DatumWithOid::null_oid(type_oid.value()),
+            }
+        }
+
+        ParamValue::Bool(b) => {
+            let datum = b.to_string().into_datum();
+            match datum {
+                Some(d) => unsafe { DatumWithOid::new(d, type_oid.value()) },
+                None => DatumWithOid::null_oid(type_oid.value()),
+            }
+        }
+
+        ParamValue::Json(j) => {
+            let datum = j.to_string().into_datum();
+            match datum {
+                Some(d) => unsafe { DatumWithOid::new(d, type_oid.value()) },
+                None => DatumWithOid::null_oid(type_oid.value()),
+            }
+        }
+
+        ParamValue::Array(arr) => {
+            // Convert array to PostgreSQL text array format
+            let elements: Vec<Option<String>> = arr.iter().map(param_value_to_string).collect();
+            let datum = elements.into_datum();
+            match datum {
+                Some(d) => unsafe { DatumWithOid::new(d, type_oid.value()) },
+                None => DatumWithOid::null_oid(type_oid.value()),
+            }
+        }
+    }
+}
+
+/// Convert a ParamValue to Option<String> for array element conversion
+fn param_value_to_string(value: &ParamValue) -> Option<String> {
+    match value {
+        ParamValue::Null => None,
+        ParamValue::String(s) => Some(s.clone()),
+        ParamValue::Integer(i) => Some(i.to_string()),
+        ParamValue::Float(f) => Some(f.to_string()),
+        ParamValue::Bool(b) => Some(b.to_string()),
+        ParamValue::Json(j) => Some(j.to_string()),
+        ParamValue::Array(_) => value.to_sql_literal(),
+    }
+}
 
 /// Execute a query builder using the AST path
 ///
@@ -34,7 +121,7 @@ pub trait AstExecutable {
         // Render the AST to SQL
         let sql = ast.render_sql();
 
-        // Convert parameters to pgrx format using native binding where safe
+        // Convert parameters to pgrx format (all as text)
         let pgrx_params = params_to_datums(&params);
 
         // Execute via SPI
@@ -67,7 +154,7 @@ pub trait AstExecutable {
         // Render the AST to SQL
         let sql = ast.render_sql();
 
-        // Convert parameters to pgrx format using native binding where safe
+        // Convert parameters to pgrx format (all as text)
         let pgrx_params = params_to_datums(&params);
 
         // Execute via SPI update (for mutations)
