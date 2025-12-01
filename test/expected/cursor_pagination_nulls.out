@@ -289,27 +289,33 @@ begin;
         jsonb_build_object('afterCursor', graphql.encode('[20, 2]'::jsonb))
         )
     );
-              jsonb_pretty              
-----------------------------------------
- {                                     +
-     "data": {                         +
-         "itemsCollection": {          +
-             "edges": [                +
-                 {                     +
-                     "node": {         +
-                         "id": 4,      +
-                         "priority": 20+
-                     }                 +
-                 },                    +
-                 {                     +
-                     "node": {         +
-                         "id": 3,      +
-                         "priority": 30+
-                     }                 +
-                 }                     +
-             ]                         +
-         }                             +
-     }                                 +
+               jsonb_pretty               
+------------------------------------------
+ {                                       +
+     "data": {                           +
+         "itemsCollection": {            +
+             "edges": [                  +
+                 {                       +
+                     "node": {           +
+                         "id": 4,        +
+                         "priority": 20  +
+                     }                   +
+                 },                      +
+                 {                       +
+                     "node": {           +
+                         "id": 3,        +
+                         "priority": 30  +
+                     }                   +
+                 },                      +
+                 {                       +
+                     "node": {           +
+                         "id": 6,        +
+                         "priority": null+
+                     }                   +
+                 }                       +
+             ]                           +
+         }                               +
+     }                                   +
  }
 (1 row)
 
@@ -865,27 +871,39 @@ begin;
         jsonb_build_object('afterCursor', graphql.encode('[20, 4]'::jsonb))
         )
     );
-              jsonb_pretty              
-----------------------------------------
- {                                     +
-     "data": {                         +
-         "itemsCollection": {          +
-             "edges": [                +
-                 {                     +
-                     "node": {         +
-                         "id": 1,      +
-                         "priority": 10+
-                     }                 +
-                 },                    +
-                 {                     +
-                     "node": {         +
-                         "id": 5,      +
-                         "priority": 10+
-                     }                 +
-                 }                     +
-             ]                         +
-         }                             +
-     }                                 +
+               jsonb_pretty               
+------------------------------------------
+ {                                       +
+     "data": {                           +
+         "itemsCollection": {            +
+             "edges": [                  +
+                 {                       +
+                     "node": {           +
+                         "id": 1,        +
+                         "priority": 10  +
+                     }                   +
+                 },                      +
+                 {                       +
+                     "node": {           +
+                         "id": 5,        +
+                         "priority": 10  +
+                     }                   +
+                 },                      +
+                 {                       +
+                     "node": {           +
+                         "id": 6,        +
+                         "priority": null+
+                     }                   +
+                 },                      +
+                 {                       +
+                     "node": {           +
+                         "id": 7,        +
+                         "priority": null+
+                     }                   +
+                 }                       +
+             ]                           +
+         }                               +
+     }                                   +
  }
 (1 row)
 
@@ -965,15 +983,36 @@ begin;
         jsonb_build_object('afterCursor', graphql.encode('[30, 3]'::jsonb))
         )
     );
-         jsonb_pretty         
-------------------------------
- {                           +
-     "data": {               +
-         "itemsCollection": {+
-             "edges": [      +
-             ]               +
-         }                   +
-     }                       +
+                jsonb_pretty                
+--------------------------------------------
+ {                                         +
+     "data": {                             +
+         "itemsCollection": {              +
+             "edges": [                    +
+                 {                         +
+                     "node": {             +
+                         "id": 6,          +
+                         "name": "unset-a",+
+                         "priority": null  +
+                     }                     +
+                 },                        +
+                 {                         +
+                     "node": {             +
+                         "id": 7,          +
+                         "name": "unset-b",+
+                         "priority": null  +
+                     }                     +
+                 },                        +
+                 {                         +
+                     "node": {             +
+                         "id": 8,          +
+                         "name": "unset-c",+
+                         "priority": null  +
+                     }                     +
+                 }                         +
+             ]                             +
+         }                                 +
+     }                                     +
  }
 (1 row)
 

@@ -311,18 +311,35 @@ fn build_cursor_pagination_clause_recursive(
 
     let nulls_first = order_elem.direction.nulls_first();
 
-    // Build: (col > val OR (col IS NOT NULL AND val IS NULL AND nulls_first))
-    // The nulls_first is a boolean literal - when false, the AND false makes the whole
-    // null-handling branch false, so only the main comparison matters.
+    // Build the cursor comparison expression for proper null handling.
+    //
+    // For ASC with NULLS FIRST, the sort order is: NULL, 1, 2, 3, ...
+    // For ASC with NULLS LAST, the sort order is: 1, 2, 3, ..., NULL
+    // For DESC with NULLS FIRST, the sort order is: NULL, 3, 2, 1, ...
+    // For DESC with NULLS LAST, the sort order is: 3, 2, 1, ..., NULL
+    //
+    // The ">" comparison (for ASC) or "<" comparison (for DESC) needs to account for:
+    // 1. Standard comparison when both are non-null: col > val (or col < val)
+    // 2. When cursor val IS NULL and col IS NOT NULL:
+    //    - With NULLS FIRST: non-null values come AFTER null, so col > cursor (include)
+    //    - With NULLS LAST: non-null values come BEFORE null, so col < cursor (exclude)
+    // 3. When cursor val IS NOT NULL and col IS NULL:
+    //    - With NULLS FIRST: null values come BEFORE non-null, so col < cursor (exclude for >)
+    //    - With NULLS LAST: null values come AFTER non-null, so col > cursor (include for >)
+    //
+    // The correct expression is:
+    // (col > val)
+    // OR (col IS NOT NULL AND val IS NULL AND nulls_first)  -- case 2: non-null > null when nulls_first
+    // OR (col IS NULL AND val IS NOT NULL AND NOT nulls_first)  -- case 3: null > non-null when nulls_last
     let main_compare = Expr::BinaryOp {
         left: Box::new(col_expr.clone()),
         op,
         right: Box::new(val_expr.clone()),
     };
 
-    // Build: (col IS NOT NULL AND val IS NULL AND {nulls_first literal})
-    // This matches the original transpiler exactly
-    let null_handling = Expr::BinaryOp {
+    // Case 2: (col IS NOT NULL AND val IS NULL AND nulls_first)
+    // When nulls come first, non-null values are "greater than" null values
+    let null_case_2 = Expr::BinaryOp {
         left: Box::new(Expr::BinaryOp {
             left: Box::new(Expr::IsNull {
                 expr: Box::new(col_expr.clone()),
@@ -338,12 +355,33 @@ fn build_cursor_pagination_clause_recursive(
         right: Box::new(Expr::Literal(Literal::Bool(nulls_first))),
     };
 
-    // First condition: (col > val) OR (col IS NOT NULL AND val IS NULL AND nulls_first)
-    // Wrap in Nested for proper parentheses
+    // Case 3: (col IS NULL AND val IS NOT NULL AND NOT nulls_first)
+    // When nulls come last, null values are "greater than" non-null values
+    let null_case_3 = Expr::BinaryOp {
+        left: Box::new(Expr::BinaryOp {
+            left: Box::new(Expr::IsNull {
+                expr: Box::new(col_expr.clone()),
+                negated: false, // IS NULL
+            }),
+            op: BinaryOperator::And,
+            right: Box::new(Expr::IsNull {
+                expr: Box::new(val_expr.clone()),
+                negated: true, // IS NOT NULL
+            }),
+        }),
+        op: BinaryOperator::And,
+        right: Box::new(Expr::Literal(Literal::Bool(!nulls_first))),
+    };
+
+    // Combine: main_compare OR null_case_2 OR null_case_3
     let first_condition = Expr::Nested(Box::new(Expr::BinaryOp {
-        left: Box::new(main_compare),
+        left: Box::new(Expr::BinaryOp {
+            left: Box::new(main_compare),
+            op: BinaryOperator::Or,
+            right: Box::new(null_case_2),
+        }),
         op: BinaryOperator::Or,
-        right: Box::new(null_handling),
+        right: Box::new(null_case_3),
     }));
 
     // Build equality check for recursion: (col = val OR (col IS NULL AND val IS NULL))

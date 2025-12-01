@@ -12,14 +12,31 @@
 //!
 //! # Safety
 //!
-//! All identifiers are properly quoted using PostgreSQL's quoting rules.
-//! All literals are properly escaped.
+//! All identifiers are quoted using PostgreSQL's native `quote_ident()` function.
+//! All literals are escaped using PostgreSQL's native `quote_literal()` function.
 
 use super::cte::{Cte, CteQuery};
 use super::expr::*;
 use super::stmt::*;
 use super::types::SqlType;
+use pgrx::{direct_function_call, pg_sys, IntoDatum};
 use std::fmt::Write;
+
+/// Quote an identifier using PostgreSQL's native quote_ident() function
+fn quote_ident(ident: &str) -> String {
+    unsafe {
+        direct_function_call::<String>(pg_sys::quote_ident, &[ident.into_datum()])
+            .expect("quote_ident failed")
+    }
+}
+
+/// Quote a literal using PostgreSQL's native quote_literal() function
+fn quote_literal(lit: &str) -> String {
+    unsafe {
+        direct_function_call::<String>(pg_sys::quote_literal, &[lit.into_datum()])
+            .expect("quote_literal failed")
+    }
+}
 
 // =============================================================================
 // Render Trait
@@ -637,7 +654,10 @@ impl SqlRenderer {
                 self.write(")");
             }
 
-            // Raw SQL - only available in tests
+            // Raw SQL - SECURITY SENSITIVE
+            // This variant is only available in test code (#[cfg(test)]).
+            // It outputs the string directly without any escaping.
+            // NEVER expose this outside of tests - use proper AST nodes instead.
             #[cfg(test)]
             Expr::Raw(sql) => {
                 self.write(sql);
@@ -910,6 +930,8 @@ impl SqlRenderer {
     }
 
     fn render_type(&mut self, sql_type: &SqlType) {
+        // Type names come from trusted sources (database schema metadata loaded via
+        // SQL queries), so we output them directly without quoting.
         if let Some(schema) = &sql_type.schema {
             self.output.push_str(schema);
             self.output.push('.');
@@ -929,31 +951,13 @@ impl SqlRenderer {
     }
 
     fn write_ident(&mut self, ident: &Ident) {
-        // Always quote identifiers to prevent SQL injection and handle special chars
-        self.output.push('"');
-        // Escape any double quotes in the identifier by doubling them
-        for c in ident.as_str().chars() {
-            if c == '"' {
-                self.output.push('"');
-            }
-            self.output.push(c);
-        }
-        self.output.push('"');
+        // Use PostgreSQL's native quote_ident() for proper escaping
+        self.output.push_str(&quote_ident(ident.as_str()));
     }
 
     fn write_literal(&mut self, s: &str) {
-        // Use dollar quoting for strings that might contain special characters
-        // This matches PostgreSQL's quote_literal behavior
-        if s.contains('\'') || s.contains('\\') {
-            // Use dollar quoting
-            self.output.push_str("$__$");
-            self.output.push_str(s);
-            self.output.push_str("$__$");
-        } else {
-            self.output.push('\'');
-            self.output.push_str(s);
-            self.output.push('\'');
-        }
+        // Use PostgreSQL's native quote_literal() for proper escaping
+        self.output.push_str(&quote_literal(s));
     }
 
     fn newline(&mut self) {
